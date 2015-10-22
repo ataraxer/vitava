@@ -9,28 +9,20 @@ import kafka.api._
 
 
 object Main extends StreamApp {
-  val codec = BidiFlow() { implicit builder =>
+  val correlator = BidiFlow() { implicit builder =>
     import FlowGraph.Implicits._
-    import KafkaAPI._
-
-    val requestFlow = Flow[RequestOrResponse]
-
-    val getKey = builder add requestFlow.map( _.requestId.get )
-    val encode = builder add requestFlow.map(encodeRequest)
-    val decode = builder add Flow[ByteString].map(decodeResponse)
 
     val bcast = builder add Broadcast[RequestOrResponse](2)
-    val zipKey = builder add ZipWith(zipWithKey _)
+    val zipKey = builder add ZipWith(KafkaApi.zipWithKey _)
 
-    bcast ~> encode
-    bcast ~> getKey ~> zipKey.in0
-             decode <~ zipKey.out
+    bcast ~> Flow[RequestOrResponse].map( _.requestId.get ) ~> zipKey.in0
 
-    BidiShape(bcast.in, encode.outlet, zipKey.in1, decode.outlet)
+    BidiShape(bcast.in, bcast.out(1), zipKey.in1, zipKey.out)
   }
 
+  val kafkaApi = BidiFlow(KafkaApi.encodeRequest _, KafkaApi.decodeResponse _)
   val framing = Framing.simpleFramingProtocol(Int.MaxValue - 4)
-  val kafkaProtocol = codec atop framing
+  val kafkaProtocol = correlator atop kafkaApi atop framing
 
   val host = scala.sys.process.Process("boot2docker ip").!!.trim
   val connection = Tcp().outgoingConnection(host, 9092)

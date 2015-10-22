@@ -5,7 +5,7 @@ import kafka.api._
 import java.nio.{ByteBuffer, ByteOrder}
 
 
-object KafkaAPI {
+object KafkaApi {
   import RequestKeys._
 
   def encodeRequest(request: RequestOrResponse): ByteString = {
