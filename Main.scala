@@ -1,114 +1,34 @@
 package ottla
 
+import akka.stream._
 import akka.stream.scaladsl._
 import akka.stream.io.Framing
 import akka.util.ByteString
 
-import scodec.Codec
-import scodec.codecs._
-import scodec.bits.BitVector
-
-import shapeless.Typeable
+import kafka.api._
 
 
-sealed trait KafkaMessage
-sealed trait KafkaRequest extends KafkaMessage
-sealed trait KafkaResponse extends KafkaMessage
+object Main extends StreamApp {
+  val codec = BidiFlow() { implicit builder =>
+    import FlowGraph.Implicits._
+    import KafkaAPI._
 
-case class MetadataRequest(
-    correlationId: Int,
-    clientId: String,
-    topics: Seq[String])
-  extends KafkaRequest
+    val requestFlow = Flow[RequestOrResponse]
 
-case class MetadataResponse(
-    correlationId: Int,
-    brokers: Seq[Broker],
-    metadata: Seq[TopicMetadata])
-  extends KafkaResponse
+    val getKey = builder add requestFlow.map( _.requestId.get )
+    val encode = builder add requestFlow.map(encodeRequest)
+    val decode = builder add Flow[ByteString].map(decodeResponse)
 
-case class Broker(id: Int, host: String, port: Int)
+    val bcast = builder add Broadcast[RequestOrResponse](2)
+    val zipKey = builder add ZipWith(zipWithKey _)
 
-case class TopicMetadata(
-    error: Int,
-    topic: String,
-    metadata: Seq[PartitionMetadata])
+    bcast ~> encode
+    bcast ~> getKey ~> zipKey.in0
+             decode <~ zipKey.out
 
-case class PartitionMetadata(
-    error: Int,
-    id: Int,
-    leader: Int,
-    replicas: Seq[Int],
-    isr: Seq[Int])
-
-
-object KafkaMessage {
-  import kafka.api.RequestKeys._
-
-  val string = variableSizeBytes(int16, utf8)
-  val bytes = variableSizeBytes(int32, byte)
-
-  def array[T: Typeable](codec: Codec[T]) = {
-    listOfN(int32, codec).upcast[Seq[T]]
+    BidiShape(bcast.in, encode.outlet, zipKey.in1, decode.outlet)
   }
 
-  def key(value: Int) = int16.unit(value)
-  val version = int16.unit(0)
-
-  val error = int16
-
-  val correlationId, partitionId, brokerId, port = int32
-  val replicas, isr = array(brokerId)
-  def leader = brokerId
-  val topic, clientId, host = string
-  val topics = array(topic)
-
-  def request(key: Int) = this.key(key) :: version :: correlationId :: clientId
-
-  def metadataRequestCodec = (request(MetadataKey) :+ topics).as[MetadataRequest]
-
-  def metadataResponseCodec = {
-    (correlationId :: array(broker) :: array(topicMeta)).as[MetadataResponse]
-  }
-
-  def broker = (brokerId :: host :: port).as[Broker]
-
-  def topicMeta = (error :: topic :: array(partitionMeta)).as[TopicMetadata]
-  def partitionMeta = (error :: partitionId :: leader :: replicas :: isr).as[PartitionMetadata]
-
-  val requestCodec = metadataRequestCodec.upcast[KafkaRequest]
-  val responseCodec = metadataResponseCodec.upcast[KafkaResponse]
-}
-
-
-object KafkaRequest {
-  val codec = KafkaMessage.requestCodec
-
-  def encode(message: KafkaRequest): ByteString = {
-    ByteString(codec.encode(message).require.toByteBuffer)
-  }
-
-  def decode(data: ByteString): KafkaRequest = {
-    codec.decode(BitVector(data.toByteBuffer)).require.value
-  }
-}
-
-
-object KafkaResponse extends {
-  val codec = KafkaMessage.responseCodec
-
-  def encode(message: KafkaResponse): ByteString = {
-    ByteString(codec.encode(message).require.toByteBuffer)
-  }
-
-  def decode(data: ByteString): KafkaResponse = {
-    codec.decode(BitVector(data.toByteBuffer)).require.value
-  }
-}
-
-
-object TcpProtocol extends StreamApp {
-  val codec = BidiFlow(KafkaRequest.encode _, KafkaResponse.decode _)
   val framing = Framing.simpleFramingProtocol(Int.MaxValue - 4)
   val kafkaProtocol = codec atop framing
 
@@ -121,13 +41,9 @@ object TcpProtocol extends StreamApp {
       throw error
   }
 
-  def log[T](f: T => Unit)(data: T) = { f(data); data }
-  def size(data: ByteString) = data.toByteBuffer.getInt
-  val logger = BidiFlow(log(size) _, log(size) _)
+  val message = new TopicMetadataRequest(42, 9000, "foobar", Seq("topic"))
 
-  val message = MetadataRequest(42, "foobar", Seq("topic"))
-
-  val whenConnected = Source.single(message)
+  Source.single(message)
     .via(kafkaProtocol join connection)
     .recover(errorHandler)
     .runForeach(println)
