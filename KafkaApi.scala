@@ -8,7 +8,7 @@ import java.nio.{ByteBuffer, ByteOrder}
 object KafkaApi {
   import RequestKeys._
 
-  def encodeRequest(request: RequestOrResponse): ByteString = {
+  def encodeRequest(request: RequestOrResponse) = {
     val buffer = ByteBuffer.allocate(request.sizeInBytes + 2)
     buffer.putShort(request.requestId.get)
     request.writeTo(buffer)
@@ -16,9 +16,9 @@ object KafkaApi {
     ByteString(buffer)
   }
 
-  def decodeResponse(response: ByteString): RequestOrResponse = {
+  def decodeResponse(request: RequestOrResponse, response: ByteString) = {
+    val key = request.requestId.get
     val buffer = response.toByteBuffer
-    val key = buffer.getShort
     decoderForKey(key)(buffer)
   }
 
@@ -34,11 +34,5 @@ object KafkaApi {
     OffsetFetchKey -> OffsetFetchResponse.readFrom,
     ConsumerMetadataKey -> ConsumerMetadataResponse.readFrom)
 
-  def zipWithKey(key: Short, response: ByteString): ByteString = {
-    implicit val order = ByteOrder.BIG_ENDIAN
-    val keyPrefix = ByteString.newBuilder.putShort(key)
-    val result = keyPrefix.result ++ response
-    result
-  }
 }
 
