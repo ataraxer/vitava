@@ -7,6 +7,27 @@ import akka.stream.scaladsl._
 object CorrelatedBidiFlow {
   import FlowGraph.Implicits._
 
+  /**
+   * Create a CorrelatedBidiFlow where the top and the bottom flows are just
+   * one simple mapping stage each, expressed by two functions.
+   *
+   * {{{
+   *
+   *     +------------------------------+
+   *     | Resulting CorrelatedBidiFlow |
+   *     |                              |
+   *     |  +------------------------+  |
+   * I1 --> |        Broadcast       | --> O1
+   *     |  +------------------------+  |
+   *     |               ↓              |
+   *     |  +------------------------+  |
+   * O2 <-- |         ZipWith        | <-- I2
+   *     |  +------------------------+  |
+   *     +------------------------------+
+   *
+   * }}}
+   *
+   */
   def apply[I1, O1, I2, O2, K](encoder: I1 => O1, decoder: (I1, I2) => O2) = {
     BidiFlow() { implicit builder =>
       val bcast = builder add Broadcast[I1](2)

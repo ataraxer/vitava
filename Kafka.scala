@@ -27,6 +27,16 @@ object Kafka {
     kafkaApi atop framing
   }
 
+  def metadataRequest(topics: String*) = {
+    new TopicMetadataRequest(topics, 0)
+  }
+
+  def offsetsRequest(topics: String*) = {
+    val partitions = topics.map( topic => Partition(topic, 0) )
+    val request = PartitionOffsetRequestInfo(OffsetRequest.LatestTime, 1)
+    OffsetRequest(partitions.map( p => p -> request ).toMap)
+  }
+
 
   def wrapMessage
       (partition: Partition, clientId: String, correlationId: () => Int)
