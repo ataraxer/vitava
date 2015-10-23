@@ -17,6 +17,7 @@ object KafkaApi {
   }
 
   def decodeResponse(request: RequestOrResponse, response: ByteString) = {
+    // TODO: check correlation id
     val key = request.requestId.get
     val buffer = response.toByteBuffer
     decoderForKey(key)(buffer)

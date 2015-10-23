@@ -1,4 +1,4 @@
-package ottla
+package ottla.protocol
 
 import akka.util.ByteString
 
@@ -99,7 +99,7 @@ object KafkaResponse extends {
     ByteString(codec.encode(message).require.toByteBuffer)
   }
 
-  def decode(data: ByteString): KafkaResponse = {
+  def decode(request: KafkaRequest, data: ByteString): KafkaResponse = {
     codec.decode(BitVector(data.toByteBuffer)).require.value
   }
 }
